@@ -1,0 +1,292 @@
+// =====================================================
+// DBML para dbdiagram.io - Sistema de Inventario
+// =====================================================
+// Copia este código en: https://dbdiagram.io/d
+
+Project LoQueHay {
+  database_type: 'PostgreSQL'
+  Note: 'Sistema de Gestión de Inventario Multi-Almacén'
+}
+
+// =====================================================
+// TABLAS DE SEGURIDAD
+// =====================================================
+
+Table permission {
+  code varchar [pk, note: 'Ej: product:create, product:delete']
+  
+  Note: 'Permisos del sistema'
+}
+
+Table role {
+  name varchar [pk]
+  
+  Note: 'Roles de usuario'
+}
+
+Table role_permissions {
+  role_name varchar [pk, ref: > role.name]
+  permission_code varchar [pk, ref: > permission.code]
+  
+  Note: 'Relación Roles-Permisos'
+}
+
+// =====================================================
+// TABLA USUARIOS
+// =====================================================
+
+Table users {
+  id bigserial [pk, increment]
+  first_name varchar
+  last_name varchar
+  username varchar [note: 'Indexed']
+  email varchar [note: 'Indexed']
+  password varchar
+  enabled boolean [default: false]
+  locked boolean [default: false]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+  created_by bigint
+  updated_by bigint
+  owner_id bigint [ref: > users.id, note: 'Usuario creador/propietario']
+  
+  indexes {
+    username
+    email
+    owner_id
+  }
+  
+  Note: 'Usuarios del sistema'
+}
+
+Table user_roles {
+  user_id bigint [pk, ref: > users.id]
+  role_name varchar [pk, ref: > role.name]
+  
+  Note: 'Roles asignados a usuarios'
+}
+
+Table user_additional_permissions {
+  user_id bigint [pk, ref: > users.id]
+  permission_code varchar [pk, ref: > permission.code]
+  
+  Note: 'Permisos adicionales por usuario'
+}
+
+Table user_revoked_permissions {
+  user_id bigint [pk, ref: > users.id]
+  permission_code varchar [pk, ref: > permission.code]
+  
+  Note: 'Permisos revocados por usuario'
+}
+
+// =====================================================
+// NEGOCIOS
+// =====================================================
+
+Table business {
+  id bigserial [pk, increment]
+  name varchar
+  owner_id bigint [ref: > users.id]
+  
+  indexes {
+    owner_id
+  }
+  
+  Note: 'Negocios del sistema'
+}
+
+Table user_business {
+  user_id bigint [pk, ref: > users.id]
+  business_id bigint [pk, ref: > business.id]
+  
+  Note: 'Trabajadores por negocio'
+}
+
+// =====================================================
+// ALMACENES
+// =====================================================
+
+Table warehouses {
+  id bigserial [pk, increment]
+  name varchar(100) [not null]
+  location varchar
+  description text
+  owner_id bigint [not null, ref: > users.id]
+  created_by bigint [not null, ref: > users.id]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+  
+  indexes {
+    owner_id
+    created_by
+  }
+  
+  Note: 'Almacenes para gestión de inventario'
+}
+
+// =====================================================
+// PRODUCTOS
+// =====================================================
+
+Table category {
+  id bigserial [pk, increment]
+  name varchar
+  description text
+  owner_id bigint [not null, ref: > users.id]
+  created_by bigint [not null, ref: > users.id]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+  
+  indexes {
+    owner_id
+    created_by
+  }
+  
+  Note: 'Categorías de productos'
+}
+
+Table product {
+  id bigserial [pk, increment]
+  sku varchar [unique, note: 'Código único del producto']
+  barcode varchar [unique, note: 'Código de barras']
+  name varchar [not null]
+  description text
+  has_expiration_date boolean [not null, default: false, note: 'Si requiere fecha de caducidad']
+  category_id bigint [not null, ref: > category.id]
+  owner_id bigint [not null, ref: > users.id]
+  created_by bigint [not null, ref: > users.id]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+  
+  indexes {
+    sku
+    barcode
+    category_id
+    owner_id
+    created_by
+  }
+  
+  Note: 'Productos del catálogo'
+}
+
+Table product_details {
+  id bigserial [pk, increment]
+  weight double
+  weight_unit varchar(50) [note: 'kg, g, lb']
+  length double
+  width double
+  dimension_unit varchar(50) [note: 'cm, m, in']
+  product_id bigint [unique, not null, ref: - product.id, note: 'Relación 1:1']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+  
+  indexes {
+    product_id
+  }
+  
+  Note: 'Detalles físicos de productos (peso, dimensiones)'
+}
+
+Table product_stock {
+  id bigserial [pk, increment]
+  quantity integer [not null, default: 0]
+  lot_number varchar [not null, note: 'Número de lote']
+  expiration_date date [note: 'Fecha de caducidad (opcional)']
+  unit_cost double [not null, note: 'Costo unitario']
+  product_id bigint [not null, ref: > product.id]
+  warehouse_id bigint [not null, ref: > warehouses.id]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+  
+  indexes {
+    product_id
+    warehouse_id
+    lot_number
+    (product_id, warehouse_id, lot_number) [unique, name: 'uq_product_stock_lot']
+  }
+  
+  Note: 'Stock por producto, almacén y lote'
+}
+
+// =====================================================
+// MOVIMIENTOS DE INVENTARIO
+// =====================================================
+
+Table inventory_movements {
+  id bigserial [pk, increment]
+  movement_type varchar(15) [not null, note: 'ENTRY, EXIT, TRANSFER, ADJUSTMENT']
+  reference_document varchar
+  note text
+  warehouse_id bigint [not null, ref: > warehouses.id]
+  owner_id bigint [not null, ref: > users.id]
+  created_by bigint [not null, ref: > users.id]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+  
+  indexes {
+    warehouse_id
+    owner_id
+    created_by
+    movement_type
+    created_at
+  }
+  
+  Note: 'Cabecera de movimientos de inventario'
+}
+
+Table inventory_movement_details {
+  id bigserial [pk, increment]
+  quantity integer [not null]
+  unit_cost double
+  lot_number varchar
+  sell_price_unit double [note: 'Precio de venta unitario']
+  expiration_date date
+  movement_id bigint [not null, ref: > inventory_movements.id]
+  product_id bigint [not null, ref: > product.id]
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+  updated_at timestamp [default: `CURRENT_TIMESTAMP`]
+  
+  indexes {
+    movement_id
+    product_id
+    lot_number
+  }
+  
+  Note: 'Detalle de productos en cada movimiento'
+}
+
+// =====================================================
+// GRUPOS DE TABLAS (para organización visual)
+// =====================================================
+
+TableGroup security {
+  permission
+  role
+  role_permissions
+}
+
+TableGroup users_auth {
+  users
+  user_roles
+  user_additional_permissions
+  user_revoked_permissions
+}
+
+TableGroup business_management {
+  business
+  user_business
+}
+
+TableGroup inventory_core {
+  warehouses
+  category
+  product
+  product_details
+  product_stock
+}
+
+TableGroup inventory_movements_group {
+  inventory_movements
+  inventory_movement_details
+}
